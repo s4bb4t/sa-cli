@@ -2,10 +2,7 @@ module github.com/s4bb4t/sa-cli
 
 go 1.25.3
 
-require (
-	github.com/spf13/cobra v1.10.2
-	golang.org/x/text v0.33.0
-)
+require github.com/spf13/cobra v1.10.2
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

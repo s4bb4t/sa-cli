@@ -1,10 +1,5 @@
 package config
 
-import (
-	"os"
-	"path/filepath"
-)
-
 type Config struct {
 	Debug   bool
 	Verbose bool
@@ -28,10 +23,10 @@ func SetVerbose(verbose bool) {
 	cfg.Verbose = verbose
 }
 
-func ConfigDir() string {
-	if dir := os.Getenv("SA_CLI_CONFIG_DIR"); dir != "" {
-		return dir
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".sa-cli")
-}
+//func ConfigDir() string {
+//	if dir := os.Getenv("SA_CLI_CONFIG_DIR"); dir != "" {
+//		return dir
+//	}
+//	home, _ := os.UserHomeDir()
+//	return filepath.Join(home, ".sa-cli")
+//}

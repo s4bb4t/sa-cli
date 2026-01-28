@@ -41,7 +41,7 @@ func init() {
 	rootCmd.AddCommand(projectCmd)
 }
 
-func runInit(cmd *cobra.Command, args []string) error {
+func runInit(_ *cobra.Command, args []string) error {
 	name := "app"
 	if len(args) > 0 {
 		name = args[0]

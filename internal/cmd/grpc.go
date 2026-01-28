@@ -34,7 +34,7 @@ func init() {
 	projectCmd.AddCommand(grpcCmd)
 }
 
-func runGrpc(cmd *cobra.Command, args []string) error {
+func runGrpc(_ *cobra.Command, args []string) error {
 	serviceName := args[0]
 
 	output := grpcOutput
