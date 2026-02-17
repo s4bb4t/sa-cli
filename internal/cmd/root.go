@@ -11,7 +11,7 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "sac",
+	Use:   "sa-cli",
 	Short: "SA CLI - A command line tool",
 	Long:  `SA CLI is a powerful command line tool for managing your workflows.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
