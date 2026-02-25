@@ -12,13 +12,24 @@ const (
 	filePerm = 0644
 )
 
+type ProjectMode uint8
+
+const (
+	ModeGRPC    ProjectMode = 1 << iota // 0b01
+	ModeOpenAPI                         // 0b10
+)
+
+func (m ProjectMode) HasGRPC() bool    { return m&ModeGRPC != 0 }
+func (m ProjectMode) HasOpenAPI() bool { return m&ModeOpenAPI != 0 }
+
 type Project struct {
 	Name      string
 	Module    string
 	OutputDir string
+	Mode      ProjectMode
 }
 
-func New(name, module, outputDir string) *Project {
+func New(name, module, outputDir string, mode ProjectMode) *Project {
 	if module == "" {
 		module = name
 	}
@@ -26,6 +37,7 @@ func New(name, module, outputDir string) *Project {
 		Name:      name,
 		Module:    module,
 		OutputDir: outputDir,
+		Mode:      mode,
 	}
 }
 
@@ -37,7 +49,7 @@ func (p *Project) Generate() error {
 		{"Creating directories", p.createDirs},
 		{"Generating files", p.createFiles},
 		{"Initializing go module", p.initGoMod},
-		{"Installing dependencies", p.goModTidy},
+		//{"Installing dependencies", p.goModTidy},
 	}
 
 	for _, step := range steps {
@@ -53,11 +65,7 @@ func (p *Project) Generate() error {
 func (p *Project) createDirs() error {
 	dirs := []string{
 		// Commands
-		"cmd/" + p.Name,
-
-		// API definitions
-		"api/proto",
-		"api/openapi",
+		"cmd/" + p.Name + "/docs",
 
 		// Internal packages (private)
 		"internal/config",
@@ -65,11 +73,11 @@ func (p *Project) createDirs() error {
 		"internal/presentation",
 
 		// Public packages
-		"pkg/grpc",
+		"pkg",
 
 		// Deployments
-		"deploy/docker",
-		"deploy/k8s",
+		"deploy/helm/templates",
+		"deploy/docker-compose",
 
 		// Scripts
 		"scripts",
@@ -77,6 +85,13 @@ func (p *Project) createDirs() error {
 		// Tests
 		"test/integration",
 		"test/e2e",
+	}
+
+	if p.Mode.HasOpenAPI() {
+		dirs = append(dirs,
+			"internal/presentation/rest/v1",
+			"tools/bundlespec",
+		)
 	}
 
 	for _, dir := range dirs {
@@ -91,12 +106,28 @@ func (p *Project) createDirs() error {
 
 func (p *Project) createFiles() error {
 	files := map[string]string{
-		"cmd/" + p.Name + "/main.go": p.mainTemplate(),
-		"internal/config/config.go":  p.configTemplate(),
-		"internal/config/otel.go":    p.configOtelTemplate(),
-		"deploy/docker/Dockerfile":   p.dockerfileTemplate(),
-		".gitignore":                 p.gitignoreTemplate(),
-		"Makefile":                   p.makefileTemplate(),
+		"cmd/" + p.Name + "/main.go":                             p.mainTemplate(),
+		"cmd/" + p.Name + "/server.go":                           p.serverTemplate(),
+		"cmd/" + p.Name + "/services.go":                         p.servicesTemplate(),
+		"internal/config/config.go":                              p.configTemplate(),
+		"Dockerfile":                                             p.dockerfileTemplate(),
+		".gitignore":                                             p.gitignoreTemplate(),
+		".gitlab-ci.yml":                                         p.ciTemplate(),
+		"Makefile":                                               p.makefileTemplate(),
+		"config.yaml":                                            p.configFileTemplate(),
+		"deploy/helm/Chart.yaml":                                 p.helmChartTemplate(),
+		"deploy/helm/values.yaml":                                p.helmValuesTemplate(),
+		"deploy/helm/values-prod.yaml":                           p.helmValuesProdTemplate(),
+		"deploy/helm/templates/deployment.yaml":                  p.helmDeploymentTemplate(),
+		"deploy/helm/templates/service.yaml":                     p.helmServiceTemplate(),
+		"deploy/helm/templates/hpa.yaml":                         p.helmHPATemplate(),
+		"deploy/helm/templates/ingress.yaml":                     p.helmIngressTemplate(),
+		"deploy/docker-compose/grafana_prom.docker-compose.yaml": p.dockerComposeMonitoringTemplate(),
+		"deploy/docker-compose/prometheus.yml":                   p.prometheusConfigTemplate(),
+	}
+
+	if p.Mode.HasOpenAPI() {
+		files["cmd/"+p.Name+"/docs/swagger.html"] = swaggerHTMLTemplate()
 	}
 
 	for path, content := range files {
@@ -117,155 +148,10 @@ func (p *Project) initGoMod() error {
 	return cmd.Run()
 }
 
-func (p *Project) goModTidy() error {
-	cmd := exec.Command("go", "mod", "tidy")
-	cmd.Dir = p.OutputDir
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run()
-}
-
-func (p *Project) mainTemplate() string {
-	return fmt.Sprintf(`package main
-
-import (
-	"context"
-	"flag"
-	"log"
-	"os/signal"
-	"syscall"
-
-	"%s/internal/config"
-	"github.com/s4bb4t/zapang/pkg/logger"
-	"go.uber.org/zap"
-)
-
-const (
-	serviceName = "%s"
-)
-
-var (
-	cfgPath = flag.String("cfg", "./config.yaml", "Config file path")
-)
-
-func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	flag.Parse()
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		log.Fatalf("load config: %%s", err)
-	}
-
-	l := logger.New(ctx, serviceName, cfg.Logger, nil)
-	defer l.Sync()
-
-	l.Info("starting service",
-		zap.String("service", serviceName),
-		logger.Environment(cfg.Logger.Environment),
-	)
-
-	if err := start(ctx, cfg, l); err != nil {
-		l.Fatal("failed to start application", zap.Error(err))
-	}
-}
-
-func start(ctx context.Context, cfg config.Config, log *logger.Logger) error {
-	// todo: application
-
-	<-ctx.Done()
-	log.Info("shutting down gracefully")
-	return nil
-}
-`, p.Module, p.Name)
-}
-
-func (p *Project) configTemplate() string {
-	return "package config\n\nimport (\n\t\"os\"\n\n\t\"github.com/go-faster/errors\"\n\t\"github.com/s4bb4t/zapang/pkg/logger\"\n\t\"gopkg.in/yaml.v3\"\n)\n\ntype (\n\tConfig struct {\n\t\tOtel       OpenTelemetry `yaml:\"otel\"`\n\t\tLogger     logger.Config `yaml:\"logger\"`\n\t}\n)\n\nfunc Load(configPath string) (Config, error) {\n\tvar cfg Config\n\n\tfile, err := os.Open(configPath)\n\tif err != nil {\n\t\treturn cfg, errors.Wrap(err, \"open config file\")\n\t}\n\tdefer file.Close()\n\n\tif err := yaml.NewDecoder(file).Decode(&cfg); err != nil {\n\t\treturn cfg, errors.Wrap(err, \"parse config file\")\n\t}\n\n\treturn cfg, nil\n}\n"
-}
-
-func (p *Project) configOtelTemplate() string {
-	return "package config\n\ntype OpenTelemetry struct {\n\tCollectorPath string `yaml:\"collector_path\"`\n\tServiceName   string `yaml:\"service_name\"`\n}\n"
-}
-
-func (p *Project) dockerfileTemplate() string {
-	return fmt.Sprintf(`FROM golang:1.23-alpine AS builder
-
-WORKDIR /app
-
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/%s ./cmd/%s
-
-FROM alpine:3.19
-
-RUN apk --no-cache add ca-certificates
-COPY --from=builder /bin/%s /bin/%s
-
-ENTRYPOINT ["/bin/%s"]
-`, p.Name, p.Name, p.Name, p.Name, p.Name)
-}
-
-func (p *Project) gitignoreTemplate() string {
-	return `# Binaries
-bin/
-*.exe
-*.dll
-*.so
-*.dylib
-
-# Test
-*.test
-coverage.out
-coverage.html
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Environment
-.env
-.env.local
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Vendor (optional)
-# vendor/
-
-# Build
-dist/
-`
-}
-
-func (p *Project) makefileTemplate() string {
-	return fmt.Sprintf(`BINARY_NAME := %s
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-
-.PHONY: build run test lint clean docker
-
-build:
-	go build -ldflags="-s -w" -o bin/$(BINARY_NAME) ./cmd/%s
-
-run: build
-	./bin/$(BINARY_NAME)
-
-test:
-	go test -race -cover ./...
-
-lint:
-	golangci-lint run
-
-clean:
-	rm -rf bin/
-
-docker:
-	docker build -t $(BINARY_NAME):$(VERSION) -f deploy/docker/Dockerfile .
-`, p.Name, p.Name)
-}
+//func (p *Project) goModTidy() error {
+//	cmd := exec.Command("go", "mod", "tidy")
+//	cmd.Dir = p.OutputDir
+//	cmd.Stdout = nil
+//	cmd.Stderr = nil
+//	return cmd.Run()
+//}
