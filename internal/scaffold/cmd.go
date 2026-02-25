@@ -17,10 +17,13 @@ func (p *Project) mainTemplateGRPC() string {
 
 import (
 	"context"
+	"fmt"
 	"os/signal"
 	"syscall"
 
 	"%s/internal/config"
+	"git.web3gate.ru/rkt/metrico/pkg/metrico"
+	"git.web3gate.ru/rkt/trace/pkg/tracer"
 	"github.com/go-faster/errors"
 	"github.com/s4bb4t/srvmon"
 	"github.com/s4bb4t/zapang"
@@ -35,7 +38,7 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		print("load config:", err)
+		fmt.Println("load config:", err)
 		return
 	}
 
@@ -52,7 +55,14 @@ func start(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 	mon := srvmon.New(cfg.SrvMon, log)
 	go mon.Run(ctx)
 
-	err := initRepositories(ctx, cfg, log)
+	_, err := tracer.New(ctx, cfg.OpenTelemetry)
+	if err != nil {
+		return errors.Wrap(err, "tracer")
+	}
+
+	m := metrico.New(cfg.Metrics)
+
+	err = initRepositories(ctx, cfg, log)
 	if err != nil {
 		return errors.Wrap(err, "init repositories")
 	}
@@ -66,7 +76,7 @@ func start(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 		srvmon.NewConnChecker(exampleConn, "exampleConn", true),
 	)
 
-	run(ctx, cfg, log)
+	run(ctx, cfg, log, m)
 	mon.SetReady()
 
 	<-ctx.Done()
@@ -75,7 +85,7 @@ func start(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 	return nil
 }
 
-func run(ctx context.Context, cfg config.Config, log *zap.Logger, reg ...Registrar) {
+func run(ctx context.Context, cfg config.Config, log *zap.Logger, metrics *metrico.Metrics, reg ...Registrar) {
 	go func() {
 		if err := serveGRPC(ctx, cfg.Server.GRPCAddress, log, reg...); err != nil {
 			log.Error(errors.Wrap(err, "serve grpc").Error())
@@ -83,8 +93,8 @@ func run(ctx context.Context, cfg config.Config, log *zap.Logger, reg ...Registr
 	}()
 
 	go func() {
-		if err := startMetricsServer(cfg.Server.MetricsAddr, log); err != nil {
-			log.Error(errors.Wrap(err, "start metrics server").Error())
+		if err := metrics.ServeMetrics().ListenAndServe(); err != nil {
+			log.Error(errors.Wrap(err, "metrics server").Error())
 		}
 	}()
 }
@@ -97,12 +107,15 @@ func (p *Project) mainTemplateOpenAPI() string {
 import (
 	"context"
 	"embed"
+	"fmt"
 	"os/signal"
 	"syscall"
 
 	"%s/internal/config"
 	//v1 "%s/internal/presentation/rest/v1"
 	//api "%s/pkg/openapi/v1"
+	"git.web3gate.ru/rkt/metrico/pkg/metrico"
+	"git.web3gate.ru/rkt/trace/pkg/tracer"
 	"github.com/go-faster/errors"
 	"github.com/s4bb4t/srvmon"
 	"github.com/s4bb4t/zapang"
@@ -120,7 +133,7 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		print("load config:", err)
+		fmt.Println("load config:", err)
 		return
 	}
 
@@ -137,7 +150,14 @@ func start(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 	mon := srvmon.New(cfg.SrvMon, log)
 	go mon.Run(ctx)
 
-	err := initRepositories(ctx, cfg, log)
+	_, err := tracer.New(ctx, cfg.OpenTelemetry)
+	if err != nil {
+		return errors.Wrap(err, "tracer")
+	}
+
+	m := metrico.New(cfg.Metrics)
+
+	err = initRepositories(ctx, cfg, log)
 	if err != nil {
 		return errors.Wrap(err, "init repositories")
 	}
@@ -154,9 +174,9 @@ func start(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 	//	return errors.Wrap(err, "create ogen server")
 	//}
 	//
-	//run(cfg, log, WithVersion(srv, "/api/v1", "v1"))
+	//run(cfg, log, m, WithVersion(srv, "/api/v1", "v1"))
 
-	run(cfg, log)
+	run(cfg, log, m)
 	mon.SetReady()
 
 	<-ctx.Done()
@@ -165,7 +185,7 @@ func start(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 	return nil
 }
 
-func run(cfg config.Config, log *zap.Logger, servers ...VersionedServer) {
+func run(cfg config.Config, log *zap.Logger, metrics *metrico.Metrics, servers ...VersionedServer) {
 	go func() {
 		if err := serveHTTP(cfg, log, servers...); err != nil {
 			log.Error(errors.Wrap(err, "serve http").Error())
@@ -173,8 +193,8 @@ func run(cfg config.Config, log *zap.Logger, servers ...VersionedServer) {
 	}()
 
 	go func() {
-		if err := startMetricsServer(cfg.Server.MetricsAddr, log); err != nil {
-			log.Error(errors.Wrap(err, "start metrics server").Error())
+		if err := metrics.ServeMetrics().ListenAndServe(); err != nil {
+			log.Error(errors.Wrap(err, "metrics server").Error())
 		}
 	}()
 }
@@ -187,12 +207,15 @@ func (p *Project) mainTemplateBoth() string {
 import (
 	"context"
 	"embed"
+	"fmt"
 	"os/signal"
 	"syscall"
 
 	"%s/internal/config"
 	//v1 "%s/internal/presentation/rest/v1"
 	//api "%s/pkg/openapi/v1"
+	"git.web3gate.ru/rkt/metrico/pkg/metrico"
+	"git.web3gate.ru/rkt/trace/pkg/tracer"
 	"github.com/go-faster/errors"
 	"github.com/s4bb4t/srvmon"
 	"github.com/s4bb4t/zapang"
@@ -210,7 +233,7 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		print("load config:", err)
+		fmt.Println("load config:", err)
 		return
 	}
 
@@ -227,7 +250,14 @@ func start(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 	mon := srvmon.New(cfg.SrvMon, log)
 	go mon.Run(ctx)
 
-	err := initRepositories(ctx, cfg, log)
+	_, err := tracer.New(ctx, cfg.OpenTelemetry)
+	if err != nil {
+		return errors.Wrap(err, "tracer")
+	}
+
+	m := metrico.New(cfg.Metrics)
+
+	err = initRepositories(ctx, cfg, log)
 	if err != nil {
 		return errors.Wrap(err, "init repositories")
 	}
@@ -253,9 +283,9 @@ func start(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 	//	return errors.Wrap(err, "create ogen server")
 	//}
 	//
-	//run(ctx, cfg, log, WithVersion(srv, "/api/v1", "v1"))
+	//run(ctx, cfg, log, m, WithVersion(srv, "/api/v1", "v1"))
 
-	run(ctx, cfg, log)
+	run(ctx, cfg, log, m)
 	mon.SetReady()
 
 	<-ctx.Done()
@@ -264,7 +294,7 @@ func start(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 	return nil
 }
 
-func run(ctx context.Context, cfg config.Config, log *zap.Logger, servers []VersionedServer, registrar []Registrar,) {
+func run(ctx context.Context, cfg config.Config, log *zap.Logger, metrics *metrico.Metrics, servers []VersionedServer, registrar []Registrar,) {
 	go func() {
 		if err := serveHTTP(cfg, log, servers...); err != nil {
 			log.Error(errors.Wrap(err, "serve http").Error())
@@ -278,8 +308,8 @@ func run(ctx context.Context, cfg config.Config, log *zap.Logger, servers []Vers
 	}()
 
 	go func() {
-		if err := startMetricsServer(cfg.Server.MetricsAddr, log); err != nil {
-			log.Error(errors.Wrap(err, "start metrics server").Error())
+		if err := metrics.ServeMetrics().ListenAndServe(); err != nil {
+			log.Error(errors.Wrap(err, "metrics server").Error())
 		}
 	}()
 }
@@ -302,13 +332,9 @@ func (p *Project) serverTemplateGRPC() string {
 import (
 	"context"
 	"net"
-	"net/http"
 	"time"
 
 	"github.com/go-faster/errors"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -325,10 +351,6 @@ const (
 	keepaliveTime    = 5 * time.Second
 	keepaliveTimeout = 1 * time.Second
 	keepaliveMinTime = 5 * time.Second
-
-	metricsReadTimeout  = 5 * time.Second
-	metricsWriteTimeout = 5 * time.Second
-	metricsIdleTimeout  = 60 * time.Second
 )
 
 type Registrar interface {
@@ -376,36 +398,6 @@ func serveGRPC(ctx context.Context, address string, l *zap.Logger, servers ...Re
 
 	return nil
 }
-
-func startMetricsServer(address string, log *zap.Logger) error {
-	reg := prometheus.NewRegistry()
-	if err := reg.Register(collectors.NewGoCollector()); err != nil {
-		return errors.Wrap(err, "register go collector")
-	}
-
-	if err := reg.Register(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{})); err != nil {
-		return errors.Wrap(err, "register process collector")
-	}
-
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-
-	srv := &http.Server{
-		Addr:         address,
-		Handler:      mux,
-		ReadTimeout:  metricsReadTimeout,
-		WriteTimeout: metricsWriteTimeout,
-		IdleTimeout:  metricsIdleTimeout,
-	}
-
-	log.Info("starting metrics server", zap.String("address", address))
-
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return errors.Wrap(err, "metrics server")
-	}
-
-	return nil
-}
 `
 }
 
@@ -413,6 +405,7 @@ func (p *Project) serverTemplateOpenAPI() string {
 	return fmt.Sprintf(`package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -422,20 +415,13 @@ import (
 	"%s/internal/config"
 	"github.com/go-faster/errors"
 	"github.com/gorilla/mux"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
 const (
-	httpReadTimeout  = 15 * time.Second
-	httpWriteTimeout = 15 * time.Second
-	httpIdleTimeout  = 60 * time.Second
-
-	metricsReadTimeout  = 5 * time.Second
-	metricsWriteTimeout = 5 * time.Second
-	metricsIdleTimeout  = 60 * time.Second
+	httpReadTimeout  = 30 * time.Second
+	httpWriteTimeout = 30 * time.Second
+	httpIdleTimeout  = 120 * time.Second
 )
 
 // VersionedServer — any ogen-generated server that can serve HTTP
@@ -454,7 +440,7 @@ func serveHTTP(cfg config.Config, log *zap.Logger, servers ...VersionedServer) e
 
 	srv := &http.Server{
 		Addr:         cfg.Server.HTTPAddress,
-		Handler:      r,
+		Handler:      corsMiddleware(r),
 		ReadTimeout:  httpReadTimeout,
 		WriteTimeout: httpWriteTimeout,
 		IdleTimeout:  httpIdleTimeout,
@@ -469,36 +455,6 @@ func serveHTTP(cfg config.Config, log *zap.Logger, servers ...VersionedServer) e
 	return nil
 }
 
-func startMetricsServer(address string, log *zap.Logger) error {
-	reg := prometheus.NewRegistry()
-	if err := reg.Register(collectors.NewGoCollector()); err != nil {
-		return errors.Wrap(err, "register go collector")
-	}
-
-	if err := reg.Register(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{})); err != nil {
-		return errors.Wrap(err, "register process collector")
-	}
-
-	httpMux := http.NewServeMux()
-	httpMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-
-	srv := &http.Server{
-		Addr:         address,
-		Handler:      httpMux,
-		ReadTimeout:  metricsReadTimeout,
-		WriteTimeout: metricsWriteTimeout,
-		IdleTimeout:  metricsIdleTimeout,
-	}
-
-	log.Info("starting metrics server", zap.String("address", address))
-
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return errors.Wrap(err, "metrics server")
-	}
-
-	return nil
-}
-
 func mountDocs(r *mux.Router, servers []VersionedServer) {
 	swaggerHTML, err := fs.ReadFile(docsFS, "docs/swagger.html")
 	if err != nil {
@@ -507,9 +463,18 @@ func mountDocs(r *mux.Router, servers []VersionedServer) {
 
 	for _, s := range servers {
 		spec := loadSpec(s.Version())
+		etag := fmt.Sprintf(`+"`"+`"%%x"`+"`"+`, sha256.Sum256(spec))
 		path := fmt.Sprintf("/docs/%%s/openapi.json", s.Version())
-		r.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
+		r.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("ETag", etag)
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			if r.Header.Get("If-None-Match") == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
 			_, _ = w.Write(spec)
 		})
 	}
@@ -521,6 +486,9 @@ func mountDocs(r *mux.Router, servers []VersionedServer) {
 	versionsJSON, _ := json.Marshal(versions)
 	r.HandleFunc("/docs/versions.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = w.Write(versionsJSON)
 	})
 
@@ -561,6 +529,22 @@ func (s *versionedServer) Version() string { return s.version }
 func WithVersion(h http.Handler, prefix, version string) VersionedServer {
 	return &versionedServer{Handler: h, prefix: prefix, version: version}
 }
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 `, p.Module)
 }
 
@@ -569,6 +553,7 @@ func (p *Project) serverTemplateBoth() string {
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -579,9 +564,6 @@ import (
 	"%s/internal/config"
 	"github.com/go-faster/errors"
 	"github.com/gorilla/mux"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -599,13 +581,9 @@ const (
 	keepaliveTimeout = 1 * time.Second
 	keepaliveMinTime = 5 * time.Second
 
-	httpReadTimeout  = 15 * time.Second
-	httpWriteTimeout = 15 * time.Second
-	httpIdleTimeout  = 60 * time.Second
-
-	metricsReadTimeout  = 5 * time.Second
-	metricsWriteTimeout = 5 * time.Second
-	metricsIdleTimeout  = 60 * time.Second
+	httpReadTimeout  = 30 * time.Second
+	httpWriteTimeout = 30 * time.Second
+	httpIdleTimeout  = 120 * time.Second
 )
 
 type (
@@ -672,7 +650,7 @@ func serveHTTP(cfg config.Config, log *zap.Logger, servers ...VersionedServer) e
 
 	srv := &http.Server{
 		Addr:         cfg.Server.HTTPAddress,
-		Handler:      r,
+		Handler:      corsMiddleware(r),
 		ReadTimeout:  httpReadTimeout,
 		WriteTimeout: httpWriteTimeout,
 		IdleTimeout:  httpIdleTimeout,
@@ -687,36 +665,6 @@ func serveHTTP(cfg config.Config, log *zap.Logger, servers ...VersionedServer) e
 	return nil
 }
 
-func startMetricsServer(address string, log *zap.Logger) error {
-	reg := prometheus.NewRegistry()
-	if err := reg.Register(collectors.NewGoCollector()); err != nil {
-		return errors.Wrap(err, "register go collector")
-	}
-
-	if err := reg.Register(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{})); err != nil {
-		return errors.Wrap(err, "register process collector")
-	}
-
-	httpMux := http.NewServeMux()
-	httpMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-
-	srv := &http.Server{
-		Addr:         address,
-		Handler:      httpMux,
-		ReadTimeout:  metricsReadTimeout,
-		WriteTimeout: metricsWriteTimeout,
-		IdleTimeout:  metricsIdleTimeout,
-	}
-
-	log.Info("starting metrics server", zap.String("address", address))
-
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return errors.Wrap(err, "metrics server")
-	}
-
-	return nil
-}
-
 func mountDocs(r *mux.Router, servers []VersionedServer) {
 	swaggerHTML, err := fs.ReadFile(docsFS, "docs/swagger.html")
 	if err != nil {
@@ -725,9 +673,18 @@ func mountDocs(r *mux.Router, servers []VersionedServer) {
 
 	for _, s := range servers {
 		spec := loadSpec(s.Version())
+		etag := fmt.Sprintf(`+"`"+`"%%x"`+"`"+`, sha256.Sum256(spec))
 		path := fmt.Sprintf("/docs/%%s/openapi.json", s.Version())
-		r.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
+		r.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("ETag", etag)
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			if r.Header.Get("If-None-Match") == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
 			_, _ = w.Write(spec)
 		})
 	}
@@ -739,6 +696,9 @@ func mountDocs(r *mux.Router, servers []VersionedServer) {
 	versionsJSON, _ := json.Marshal(versions)
 	r.HandleFunc("/docs/versions.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = w.Write(versionsJSON)
 	})
 
@@ -778,6 +738,22 @@ func (s *versionedServer) Version() string { return s.version }
 // WithVersion wraps an http.Handler (e.g. *api.Server) into a VersionedServer.
 func WithVersion(h http.Handler, prefix, version string) VersionedServer {
 	return &versionedServer{Handler: h, prefix: prefix, version: version}
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 `, p.Module)
 }

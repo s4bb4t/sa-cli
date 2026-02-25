@@ -65,7 +65,7 @@ func (p *Project) Generate() error {
 func (p *Project) createDirs() error {
 	dirs := []string{
 		// Commands
-		"cmd/" + p.Name,
+		"cmd/" + p.Name + "/docs",
 
 		// Internal packages (private)
 		"internal/config",
@@ -110,7 +110,6 @@ func (p *Project) createFiles() error {
 		"cmd/" + p.Name + "/server.go":                           p.serverTemplate(),
 		"cmd/" + p.Name + "/services.go":                         p.servicesTemplate(),
 		"internal/config/config.go":                              p.configTemplate(),
-		"internal/config/otel.go":                                p.configOtelTemplate(),
 		"Dockerfile":                                             p.dockerfileTemplate(),
 		".gitignore":                                             p.gitignoreTemplate(),
 		".gitlab-ci.yml":                                         p.ciTemplate(),
@@ -125,6 +124,10 @@ func (p *Project) createFiles() error {
 		"deploy/helm/templates/ingress.yaml":                     p.helmIngressTemplate(),
 		"deploy/docker-compose/grafana_prom.docker-compose.yaml": p.dockerComposeMonitoringTemplate(),
 		"deploy/docker-compose/prometheus.yml":                   p.prometheusConfigTemplate(),
+	}
+
+	if p.Mode.HasOpenAPI() {
+		files["cmd/"+p.Name+"/docs/swagger.html"] = swaggerHTMLTemplate()
 	}
 
 	for path, content := range files {

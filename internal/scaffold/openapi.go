@@ -36,6 +36,7 @@ func (o *OpenAPIService) Generate() error {
 		{"Generating .ogen.yml", o.createOgenConfig},
 		{"Generating openapi go:generate", o.createGenerateFile},
 		{"Generating bundlespec tool", o.createBundlespecTool},
+		{"Generating swagger.html", o.createSwaggerHTML},
 		{"Generating REST server stub", o.createServerStub},
 		{"Generating error handler", o.createErrorHandler},
 		{"Appending Makefile targets", o.appendMakefileTargets},
@@ -108,9 +109,12 @@ func (o *OpenAPIService) createOgenConfig() error {
   infer_types: true
   allow_remote: true
   depth_limit: 1000
+  authentication_schemes:
+    - 'bearer'
 
 generator:
   convenient_errors: "on"
+  ignore_not_implemented: ["empty schema in request body"]
   features:
     enable:
       - 'paths/server'
@@ -217,6 +221,10 @@ func bundle(src, dst string) error {
 }
 `
 	return os.WriteFile(filepath.Join(o.OutputDir, "tools", "bundlespec", "main.go"), []byte(content), filePerm)
+}
+
+func (o *OpenAPIService) createSwaggerHTML() error {
+	return os.WriteFile(filepath.Join(o.OutputDir, "cmd", o.Name, "docs", "swagger.html"), []byte(swaggerHTMLTemplate()), filePerm)
 }
 
 func (o *OpenAPIService) createServerStub() error {
@@ -358,7 +366,7 @@ bundle-spec:
 	go run tools/bundlespec/main.go api/openapi cmd/%s/docs
 
 generate-ogen: bundle-spec
-	go generate ./pkg/openapi/...
+	go generate ./...
 `, o.Name)
 
 	f, err := os.OpenFile(makefilePath, os.O_APPEND|os.O_WRONLY, filePerm)

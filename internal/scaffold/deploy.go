@@ -5,7 +5,7 @@ import "fmt"
 func (p *Project) dockerfileTemplate() string {
 	bundleStep := ""
 	if p.Mode.HasOpenAPI() {
-		bundleStep = fmt.Sprintf("\nRUN go run tools/bundlespec/main.go api/openapi cmd/%s/docs\n", p.Name)
+		bundleStep = fmt.Sprintf("go run tools/bundlespec/main.go api/openapi cmd/%s/docs && \\\n    ", p.Name)
 	}
 
 	expose := "EXPOSE 2112 8085"
@@ -21,12 +21,8 @@ FROM git.web3gate.ru:5000/golang:1.25.5 AS builder
 
 ARG VERSION=dev
 ARG BUILD_TIME
-ARG NETRC
 
-RUN if [ -n "$NETRC" ]; then \
-      echo "$NETRC" > ~/.netrc && \
-      chmod 600 ~/.netrc; \
-    fi
+COPY --chmod=600 netrc /root/.netrc
 
 WORKDIR /app
 
@@ -35,26 +31,27 @@ ENV GOSUMDB=off
 ENV GOPRIVATE="git.web3gate.ru"
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 COPY . .
-%s
-RUN CGO_ENABLED=0 GOOS=linux go build \
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    %sCGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}" \
     -o bin/%s ./cmd/%s
 
 # Runtime stage
 FROM git.web3gate.ru:5000/alpine:3.18.3
 
-RUN apk --no-cache add ca-certificates tzdata
-
-RUN addgroup -g 1000 appuser && \
+RUN apk --no-cache add ca-certificates tzdata && \
+    addgroup -g 1000 appuser && \
     adduser -D -u 1000 -G appuser appuser
 
 WORKDIR /app
 
-COPY --from=builder /app/bin/%s .
-COPY --from=builder /app/config.yaml .
+COPY --from=builder /app/bin/%s /app/config.yaml ./
 
 RUN chown -R appuser:appuser /app
 
@@ -62,7 +59,7 @@ USER appuser
 
 %s
 
-ENTRYPOINT ["/app/%s"]
+ENTRYPOINT ["./%s"]
 `, bundleStep, p.Name, p.Name, p.Name, expose, p.Name)
 }
 
@@ -102,6 +99,7 @@ dist/
 cmd/docs/*/openapi.json
 example
 
+.old
 .claude
 `
 }
@@ -159,8 +157,13 @@ type: application
 }
 
 func (p *Project) helmValuesTemplate() string {
+	httpEnabled := "false"
+	if p.Mode.HasOpenAPI() {
+		httpEnabled = "true"
+	}
+
 	return fmt.Sprintf(`app:
-  project: aml
+  project: %s
   app: %s
   repository: git.web3gate.ru:5000
   tag: latest
@@ -168,7 +171,7 @@ func (p *Project) helmValuesTemplate() string {
 replicas: 1
 
 k8s:
-  namespace: aml-dev
+  namespace: %s-dev
 
 resources:
   requests:
@@ -182,9 +185,9 @@ ingress:
   class:
     name: nginx
   http:
-    host: aml-%s.dev.web3gate.ru
-    secret: aml-dev
-    enabled: false
+    host: %s.dev.web3gate.ru
+    secret: %s-dev
+    enabled: %s
     port: 8080
   grpc:
     enabled: true
@@ -204,7 +207,7 @@ metrics:
     enabled: true
 
 hpa:
-  minReplicas: 1
+  minReplicas: 2
   maxReplicas: 5
 
 env:
@@ -213,12 +216,17 @@ env:
   VAULT_ADDRESS: ""
   VAULT_SECRET_PATH: ""
   STAGE: ""
-`, p.Name, p.Name)
+`, p.Name, p.Name, p.Name, p.Name, p.Name, httpEnabled)
 }
 
 func (p *Project) helmValuesProdTemplate() string {
+	httpEnabled := "false"
+	if p.Mode.HasOpenAPI() {
+		httpEnabled = "true"
+	}
+
 	return fmt.Sprintf(`app:
-  project: aml
+  project: %s
   app: %s
   repository: git.web3gate.ru:5000
   tag: latest
@@ -226,23 +234,23 @@ func (p *Project) helmValuesProdTemplate() string {
 replicas: 1
 
 k8s:
-  namespace: aml
+  namespace: %s
 
 resources:
   requests:
-    cpu: 50m
-    memory: 64Mi
+    cpu: 500m
+    memory: 512Mi
   limits:
-    cpu: 100m
-    memory: 128Mi
+    cpu: "1"
+    memory: 1Gi
 
 ingress:
   class:
     name: nginx-infra
   http:
-    host: aml-%s.web3gate.ru
-    secret: aml
-    enabled: false
+    host: %s.web3gate.ru
+    secret: %s
+    enabled: %s
     port: 8080
   grpc:
     enabled: true
@@ -262,7 +270,7 @@ metrics:
     enabled: true
 
 hpa:
-  minReplicas: 1
+  minReplicas: 2
   maxReplicas: 5
 
 env:
@@ -271,7 +279,7 @@ env:
   VAULT_ADDRESS: ""
   VAULT_SECRET_PATH: ""
   STAGE: ""
-`, p.Name, p.Name)
+`, p.Name, p.Name, p.Name, p.Name, p.Name, httpEnabled)
 }
 
 func (p *Project) helmDeploymentTemplate() string {
